@@ -1,6 +1,6 @@
 {
   "name": "bilimini",
-  "version": "1.0.3",
+  "version": "1.0.8",
   "description": "Hide!bilibili",
   "main": "main.js",
   "scripts": {
@@ -18,5 +18,8 @@
     "mac": {
       "category": "Network"
     }
+  },
+  "dependencies": {
+    "hls.js": "^0.7.8"
   }
 }

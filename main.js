@@ -8,22 +8,98 @@ const platform = process.platform.startsWith('win') ? 'win' : process.platform;
 
 // Keep a global reference of the window object, if you don't, the window will
 // be closed automatically when the JavaScript object is garbage collected.
-let mw = null;
-
+let mainWindow = null;
 function openMainWindow() {
-  mw = new electron.BrowserWindow({width: 375, height: 500, frame: false});
-  mw.loadURL('file://' + __dirname + '/index.html');
-  mw.setAlwaysOnTop(true, 'torn-off-menu');
-  mw.on('closed', () => {
-    mw = null;
+  mainWindow = new electron.BrowserWindow({width: 375, height: 500, frame: false});
+  mainWindow.loadURL('file://' + __dirname + '/index.html');
+  mainWindow.setAlwaysOnTop(true, 'torn-off-menu');
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+    if( selectPartWindow ) {
+      selectPartWindow.close();
+      selectPartWindow = null;
+    }
   });
-  // mw.webContents.openDevTools();
+  // 带起来自己的分p选择页
+  initSelectPartWindow();
+  // mainWindow.webContents.openDevTools();
+}
+
+// 初始化交互窗口，用于设置、选分p等
+let selectPartWindow = null;
+function initSelectPartWindow() {
+  selectPartWindow = new electron.BrowserWindow({
+    width: 200, height: 300, 
+    parent: mainWindow, frame: false, show: false
+  });
+  selectPartWindow.hide();
+  selectPartWindow.loadURL('file://' + __dirname + '/selectP.html');
+  selectPartWindow.on('closed', () => {
+    selectPartWindow = null;
+  });
+  // selectPartWindow.openDevTools();
+}
+
+function openSelectPartWindow() {
+  if( !mainWindow || !selectPartWindow ) {
+    return;
+  }
+  var p = mainWindow.getPosition(), s = mainWindow.getSize(),
+      pos = [p[0] + s[0] + 10, p[1]];
+  selectPartWindow.setPosition(pos[0], pos[1]);
+  selectPartWindow.show();
+}
+
+function openSelectPartWindowOnMessage() {
+  // 切换、可开可关
+  ipc.on('toggle-select-part-window', () => {
+    if( selectPartWindow && selectPartWindow.isVisible() ) {
+      selectPartWindow.hide();
+    } else {
+      openSelectPartWindow();
+    }
+  });
+  // 仅开启
+  ipc.on('show-select-part-window', openSelectPartWindow);
+}
+
+function initExchangeMessageForRenderers() {
+  // 转发分p数据，真的只能用这么蠢的方法实现么。。。
+  ipc.on('update-part', (ev, args) => {
+    if( !args && selectPartWindow && selectPartWindow.isVisible() ) {
+      selectPartWindow.hide();
+    }
+    selectPartWindow && selectPartWindow.webContents.send('update-part', args);
+  });
+  // 转发番剧分p消息，这俩的格式是不一样的，分局的分p里头带了playurl
+  ipc.on('update-bangumi-part', (ev, args) => {
+    selectPartWindow && selectPartWindow.webContents.send('update-bangumi-part', args);
+  });
+  // 转发选p消息
+  ipc.on('select-part', (ev, args) => {
+    mainWindow && mainWindow.webContents.send('select-part', args);
+  });
+  // 番剧选P
+  ipc.on('select-bangumi-part', (ev, args) => {
+    mainWindow && mainWindow.webContents.send('select-bangumi-part', args);
+  });
+}
+
+  
+// mainWindow在default/mini尺寸间切换时同时移动selectPartWindow
+function reposSelectPartWindowOnMainWindowResize() {
+  ipc.on('main-window-resized', (ev, pos, size) => {
+    selectPartWindow && selectPartWindow.setPosition((pos[0] + size[0] + 10), pos[1], true);
+  });
 }
 
 function init() {
   openMainWindow();
   bindGloablShortcut();
   initMenu();
+  initExchangeMessageForRenderers();
+  openSelectPartWindowOnMessage();
+  reposSelectPartWindowOnMainWindowResize();
 }
 
 // This method will be called when Electron has finished
@@ -43,10 +119,10 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
-  if( mw === null ) {
+  if( mainWindow === null ) {
     openMainWindow();
   } else {
-    mw.show();
+    mainWindow.show();
   }
 });
 
@@ -77,12 +153,16 @@ function initMenu() {
       label: 'Debug',
       submenu: [
         {
-          label: 'Open Renderrer Console',
-          click() { mw.webContents.openDevTools(); }
+          label: 'Open Main Window Console',
+          click() { mainWindow.webContents.openDevTools(); }
+        },
+        {
+          label: 'Open Config Window Console',
+          click() { selectPartWindow.webContents.openDevTools(); }
         },
         {
           label: 'Open Webview Console',
-          click() { mw.webContents.send('openWebviewDevTools'); }
+          click() { mainWindow.webContents.send('openWebviewDevTools'); }
         }
       ]
     }, {
@@ -99,13 +179,15 @@ function initMenu() {
 
 // 老板键
 function bindGloablShortcut() {
-  let shortcut = platform == 'win' ? 'ctrl+e' : 'alt+w';
+  let shortcut = platform == 'darwin' ? 'alt+w' : 'ctrl+e';
   let bindRes = globalShortcut.register(shortcut, () => {
-    if( !mw ) return false;
-    if( mw.isVisible() ) {
-      mw.hide();
-    } else {
-      mw.showInactive();
+    if( mainWindow ) {
+      if( mainWindow.isVisible() ) {
+        mainWindow.hide();
+        selectPartWindow && selectPartWindow.isVisible() && selectPartWindow.hide();
+      } else {
+        mainWindow.showInactive();
+      }
     }
   });
   if( !bindRes ) {
